@@ -1,0 +1,210 @@
+  <div class="container">
+    <div class="header">
+      <h1>📋 Заявки с сайта</h1>
+      <div class="stats" id="stats">
+        <div class="stat-card">
+          <span class="stat-number" id="totalCount">0</span>
+          <span class="stat-label">всего заявок</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-number" id="todayCount">0</span>
+          <span class="stat-label">сегодня</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="orders-table" id="ordersTable">
+      <div class="empty-state">
+        <div class="empty-icon">📭</div>
+        <p>Загрузка заявок...</p>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn" onclick="refreshOrders()">
+        🔄 Обновить
+      </button>
+      <button class="btn btn-danger" onclick="clearAllOrders()">
+        🗑️ Очистить все
+      </button>
+      <button class="btn" onclick="exportToCSV()">
+        📥 Экспорт в CSV
+      </button>
+    </div>
+    <div class="refresh-info">
+      Автообновление каждые 30 секунд
+    </div>
+  </div>
+
+  <script>
+    const API_URL = '/api/orders';
+
+    async function loadOrders() {
+      try {
+        const response = await fetch(API_URL);
+        const data = await response.json();
+        
+        if (data.success && data.orders) {
+          renderOrders(data.orders);
+          updateStats(data.orders);
+        } else {
+          showEmpty('Нет заявок');
+        }
+      } catch (error) {
+        console.error('Ошибка загрузки:', error);
+        showEmpty('Ошибка загрузки заявок');
+      }
+    }
+
+    function renderOrders(orders) {
+      if (!orders || orders.length === 0) {
+        showEmpty('Нет заявок');
+        return;
+      }
+
+      const today = new Date().toDateString();
+      const rows = orders.reverse().map(order => {
+        const orderDate = new Date(order.createdAt);
+        const isToday = orderDate.toDateString() === today;
+        
+        return `
+          <tr>
+            <td style="white-space: nowrap">
+              ${formatDate(order.createdAt)}
+              ${isToday ? '<span class="badge badge-new" style="margin-left: 8px">Новая</span>' : ''}
+            </td>
+            <td>${escapeHtml(order.name)}</td>
+            <td>${escapeHtml(order.phone)}</td>
+            <td>${escapeHtml(order.eventType)}</td>
+            <td class="services-cell">
+              <div class="services-list">
+                ${order.services.map(s => `<span class="service-tag">${escapeHtml(s)}</span>`).join('')}
+              </div>
+            </td>
+            <td>${order.date || '—'}</td>
+            <td>${escapeHtml(order.additionalInfo?.substring(0, 50) || '—')}${order.additionalInfo?.length > 50 ? '...' : ''}</td>
+          </tr>
+        `;
+      }).join('');
+
+      document.getElementById('ordersTable').innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Дата</th>
+              <th>Имя</th>
+              <th>Телефон</th>
+              <th>Тип события</th>
+              <th>Услуги</th>
+              <th>Дата мероприятия</th>
+              <th>Доп. информация</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows}
+          </tbody>
+        </table>
+      `;
+    }
+
+    function updateStats(orders) {
+      const total = orders.length;
+      const today = new Date().toDateString();
+      const todayCount = orders.filter(order => {
+        return new Date(order.createdAt).toDateString() === today;
+      }).length;
+
+      document.getElementById('totalCount').textContent = total;
+      document.getElementById('todayCount').textContent = todayCount;
+    }
+
+    function showEmpty(message) {
+      document.getElementById('ordersTable').innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">📭</div>
+          <p>${message}</p>
+        </div>
+      `;
+    }
+
+    async function clearAllOrders() {
+      if (!confirm('Вы уверены, что хотите удалить все заявки? Это действие нельзя отменить.')) {
+        return;
+      }
+
+      try {
+        const response = await fetch(API_URL, {
+          method: 'DELETE'
+        });
+        
+        if (response.ok) {
+          alert('✅ Все заявки удалены');
+          loadOrders();
+        } else {
+          alert('❌ Ошибка при удалении');
+        }
+      } catch (error) {
+        alert('❌ Ошибка: ' + error.message);
+      }
+    }
+
+    function exportToCSV() {
+      fetch(API_URL)
+        .then(res => res.json())
+        .then(data => {
+          if (!data.orders || data.orders.length === 0) {
+            alert('Нет данных для экспорта');
+            return;
+          }
+
+          const headers = ['Дата', 'Имя', 'Телефон', 'Тип события', 'Услуги', 'Дата мероприятия', 'Доп. информация'];
+          const rows = data.orders.map(order => [
+            new Date(order.createdAt).toLocaleString('ru-RU'),
+            order.name,
+            order.phone,
+            order.eventType,
+            order.services.join(', '),
+            order.date,
+            order.additionalInfo || ''
+          ]);
+
+          const csvContent = [headers, ...rows]
+            .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+            .join('\n');
+
+          const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+          const link = document.createElement('a');
+          const url = URL.createObjectURL(blob);
+          link.setAttribute('href', url);
+          link.setAttribute('download', `заявки_${new Date().toISOString().slice(0, 19)}.csv`);
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        });
+    }
+
+    function formatDate(dateString) {
+      const date = new Date(dateString);
+      return date.toLocaleString('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    window.refreshOrders = loadOrders;
+    window.clearAllOrders = clearAllOrders;
+    window.exportToCSV = exportToCSV;
+
+    loadOrders();
+    setInterval(loadOrders, 30000);
+    </script>
